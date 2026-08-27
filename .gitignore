@@ -8,9 +8,17 @@ venv/
 *.sqlite3
 
 # Env
-.env
-.env.local
-.env.*.local
+# .env files are deliberately COMMITTED — this is a private repo and the same
+# secrets are needed on several machines. Consequences to keep in mind:
+#   - Anyone with read access to the repo has the Neon credentials, the Groq key
+#     and the JWT signing secret.
+#   - Git history is permanent. Rotating a key later does not remove the old one
+#     from earlier commits; making the repo public would expose every version.
+# If this ever stops being a solo private project, rotate all three secrets and
+# switch to encrypted-at-rest secrets (git-crypt, age, SOPS) or a secrets manager.
+# .env
+# .env.local
+# .env.*.local
 
 # Node
 node_modules/
