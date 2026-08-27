@@ -76,6 +76,13 @@ Also creates 21 applications spread across every status and four message threads
 so the applicants list, the status controls, the unread badge and the AI
 recommendations all have something to show.
 
+Every seeded record is fully populated: jobs carry responsibilities, requirements,
+benefits, nice-to-have skills, seniority and work mode; candidates carry a bio,
+years of experience, preferences and an avatar; companies carry a logo, industry
+and description. Avatars come from DiceBear's initials endpoint, so no image files
+are checked in. All three work modes and several seniority levels appear, so the
+filters and the ranking signals are visible without editing anything.
+
 Every seeded account uses the password **`password123`**. Two to start with:
 
 | Role | Email |
@@ -107,7 +114,7 @@ The seed data uses these same spellings, and a test asserts it stays that way.
 
 ```bash
 cd backend
-pytest                   # 58 tests
+pytest                   # 106 tests
 ```
 
 Tests run against the database in `DATABASE_URL` and **drop and recreate every
@@ -125,16 +132,106 @@ suggestion engine's cache, invalidation and fallback behaviour (FR-9, FR-10), an
 the structure of the seed data — including a cross-check that every seed skill is
 spelled the way the frontend catalogue spells it.
 
-## How the AI suggestions work
+`tests/test_matching.py` isolates each ranking signal: two jobs identical on
+skills, differing only in the thing under test. If the ranking stopped weighing
+work mode, or seniority, or salary, exactly one of those tests would fail.
+
+## What a job post holds
+
+Beyond title, description and skills:
+
+| Field | Why it exists |
+|---|---|
+| `work_mode` — on-site / hybrid / remote | Separate from employment type, so a full-time remote role can say so |
+| `job_type` — full-time / part-time / contract / internship / temporary | How the role is contracted |
+| `experience_level` + `min_years_experience` | Ranked against the candidate's own seniority |
+| `nice_to_have_skills` | Widens the match without excluding anyone; scored below required skills |
+| `responsibilities`, `requirements`, `benefits` | Structured lists rather than one prose blob |
+| `salary_min` / `salary_max` / `salary_currency` | Scored against what the candidate wants |
+| `application_deadline` | Optional, inclusive — after it the post expires |
+
+### Deadlines and expiry
+
+`application_deadline` is a **date, not a timestamp**, and it is **inclusive** —
+applications are accepted all through that day, and the post expires the day
+after. A job with no deadline never expires.
+
+The server derives `is_expired`, `days_until_deadline` and `accepts_applications`
+and returns them on every job, so no client repeats the date arithmetic and every
+client agrees on where the boundary sits. The frontend never recomputes expiry
+from the date string, because the viewer's timezone would shift the answer by a
+day either side of midnight.
+
+What expiry does:
+
+| | Behaviour |
+|---|---|
+| Applying | Rejected with a 400 naming the date — enforced in the API, not only the UI |
+| Browse | Hidden by default; an "include roles past their deadline" checkbox brings them back |
+| Direct link | Always works, showing an Expired badge and a banner — a bookmark never 404s |
+| Recruiter's own list | Always visible, badged, and still editable so a deadline can be extended |
+| Suggestions | Never recommended, and dropped on rehydration if they expired since caching |
+| Existing applications | Untouched — expiry stops new applications, it does not void the ones already in |
+
+A past deadline is rejected when **creating** a post (it would be dead on
+arrival) but allowed when **editing** one, otherwise an expired post could never
+be corrected or revived.
+
+The UI shows four states: `Closes 15 March` (routine), `Closes in 3 days` (amber,
+within a week), `Closes today` (red), and `Expired` (red, card dimmed).
+
+> **Schema note.** The original spec's `job_type` mixed employment type with work
+> arrangement — "remote" sat alongside "full_time", so a full-time remote role
+> could not describe itself. Work arrangement now lives in `work_mode`. The
+> migration rewrites existing `job_type='remote'` rows to
+> `full_time` + `work_mode='remote'` before tightening the constraint.
+
+## What a candidate profile holds
+
+Identity (name, headline, bio, avatar, location, resume link) plus the inputs the
+ranking scores against: `skills`, `years_experience`, `experience_level`,
+`preferred_job_types`, `preferred_work_modes`, `preferred_locations` and
+`desired_salary_min`.
+
+All optional. A field left blank simply stops being scored — it never empties the
+dashboard. The candidate dashboard nudges toward whichever ones are still unset.
+
+Recruiters get an avatar/logo, plus `about`, `industry` and `headquarters`, which
+appear on every job they post.
+
+## How the suggestions work
 
 Two stages, one external call — no vector DB, no agent framework (spec §12):
 
-1. **SQL shortlist.** `jobs.required_skills && :candidate_skills` against the GIN
-   index picks the open jobs sharing at least one skill, ranked by overlap count
-   and then by the share of the job's requirements met. Top 10.
-2. **One Groq call.** The candidate's skills plus those 10 jobs go into a single
-   prompt; the model returns strict JSON with a rank and a one-sentence reason
-   per job.
+**1. Deterministic shortlist and scoring.** Postgres narrows the field with the
+GIN indexes: a job qualifies if it shares a skill with the candidate on *either*
+the required or the nice-to-have list. Each survivor is then scored in Python on
+several signals:
+
+| Signal | Weight | Effect |
+|---|---:|---|
+| Required skill overlap | 10 each | The dominant term |
+| Requirement coverage | 6 | A 2-of-3 match beats a 2-of-9 |
+| Nice-to-have overlap | 3 each | Widens without dominating |
+| Seniority fit | 6 | Full at the same level, less per step away |
+| Work arrangement | 5 | Matches a stated preference, or costs half that |
+| Location | 4 | Substring both ways; remote always satisfies |
+| Employment type | 4 | Against preferred types |
+| Salary | 3 | Job's ceiling against the candidate's floor |
+| Recency | 1.5 | A nudge, never a decider |
+
+Every signal that fires also produces a short label — "Remote — as you prefer",
+"5+ years — you have 6" — which becomes a chip on the dashboard and grounding for
+the prompt. A score is never an unexplained number.
+
+Why more than skills: a senior on-site role in Berlin and a junior remote role
+overlap identically on skills, but they are not equally good matches for someone
+with eight years who only works remotely.
+
+**2. One Groq call.** The candidate's profile — bio, seniority, preferences — and
+the shortlisted jobs with their descriptions, modes and salary bands go into a
+single prompt. The model returns strict JSON: a rank and a one-sentence reason
+per job.
 
 The shortlist is the source of truth for *which* jobs exist — the model can only
 reorder and explain them. Hallucinated job ids are dropped, and any shortlisted
@@ -145,8 +242,9 @@ unparseable JSON all fall through to the SQL ranking with generated reasons, and
 the response says which path ran (`source: "ai" | "fallback"`).
 
 **It calls Groq at most once per hour per candidate.** Results are cached in
-`suggestion_caches`, keyed by candidate id plus a hash of their skill list — so
-editing your skills invalidates the cache for free, with no explicit delete.
+`suggestion_caches`, keyed by candidate id plus a hash of *every field the ranking
+reads* — so editing a location preference invalidates the cache just as a skill
+change does, with no explicit delete.
 
 ## API
 
@@ -184,6 +282,6 @@ Then update `CORS_ORIGINS` on Render to include the real Vercel URL and redeploy
 
 ## Not in this version
 
-Per spec §8: admin role, email verification and password reset, resume upload and
-parsing, WebSocket chat (polling every 15–30s stands in), billing, notifications,
-and embedding-based skill matching.
+Per spec §8: admin role, email verification and password reset, resume and avatar
+**file** upload (both are URLs), WebSocket chat (polling every 15–30s stands in),
+billing, notifications, and embedding-based skill matching.

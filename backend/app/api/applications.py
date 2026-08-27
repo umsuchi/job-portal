@@ -81,6 +81,16 @@ async def apply(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This job is closed and no longer accepting applications.",
         )
+    if job.is_expired:
+        # Enforced here rather than only in the UI — the deadline is a rule, and
+        # a stale page or a direct POST must not get around it.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The application deadline for this job passed on "
+                f"{job.application_deadline:%-d %B %Y}."
+            ),
+        )
 
     application = Application(
         job_id=job.id,
@@ -100,25 +110,32 @@ async def apply(
     return await _serialize(db, application, candidate)
 
 
+def _job_summary(job: Job, company: RecruiterProfile | None) -> JobSummary:
+    return JobSummary(
+        id=job.id,
+        title=job.title,
+        location=job.location,
+        job_type=job.job_type,
+        work_mode=job.work_mode,
+        experience_level=job.experience_level,
+        application_deadline=job.application_deadline,
+        is_expired=job.is_expired,
+        status=job.status,
+        company_name=getattr(company, "company_name", None),
+        company_avatar_url=getattr(company, "avatar_url", None),
+    )
+
+
 async def _serialize(
     db: AsyncSession, application: Application, user: User
 ) -> ApplicationOut:
     job = await db.get(Job, application.job_id)
     company = await db.scalar(
-        select(RecruiterProfile.company_name).where(
-            RecruiterProfile.user_id == job.recruiter_id
-        )
+        select(RecruiterProfile).where(RecruiterProfile.user_id == job.recruiter_id)
     )
     unread = await _unread_map(db, user, [application.id])
     out = ApplicationOut.model_validate(application)
-    out.job = JobSummary(
-        id=job.id,
-        title=job.title,
-        location=job.location,
-        job_type=job.job_type,
-        status=job.status,
-        company_name=company,
-    )
+    out.job = _job_summary(job, company)
     out.unread_messages = unread.get(application.id, 0)
     return out
 
@@ -130,7 +147,7 @@ async def my_applications(
 ):
     """US-3.3 — the candidate's applications, most recent first."""
     rows = await db.execute(
-        select(Application, Job, RecruiterProfile.company_name)
+        select(Application, Job, RecruiterProfile)
         .join(Job, Job.id == Application.job_id)
         .outerjoin(RecruiterProfile, RecruiterProfile.user_id == Job.recruiter_id)
         .where(Application.candidate_id == candidate.id)
@@ -142,14 +159,7 @@ async def my_applications(
     out = []
     for application, job, company in records:
         item = ApplicationOut.model_validate(application)
-        item.job = JobSummary(
-            id=job.id,
-            title=job.title,
-            location=job.location,
-            job_type=job.job_type,
-            status=job.status,
-            company_name=company,
-        )
+        item.job = _job_summary(job, company)
         item.unread_messages = unread.get(application.id, 0)
         out.append(item)
     return out

@@ -107,7 +107,15 @@ async def make_actor(client: AsyncClient, role: str, **profile) -> Actor:
 @pytest_asyncio.fixture
 async def candidate(client) -> Actor:
     actor = await make_actor(client, "candidate", full_name="Casey Candidate")
-    await actor.put("/auth/me", json={"skills": ["React", "Node.js", "PostgreSQL"]})
+    await actor.put("/auth/me", json={
+        "skills": ["React", "Node.js", "PostgreSQL"],
+        "years_experience": 6,
+        "experience_level": "senior",
+        "preferred_job_types": ["full_time"],
+        "preferred_work_modes": ["remote"],
+        "preferred_locations": ["Remote"],
+        "desired_salary_min": 80000,
+    })
     return actor
 
 
@@ -125,8 +133,12 @@ JOB_BODY = {
     "title": "Senior React Engineer",
     "description": "Build and ship our customer-facing web application.",
     "required_skills": ["React", "TypeScript", "Node.js"],
+    "nice_to_have_skills": ["Storybook"],
+    "experience_level": "senior",
+    "min_years_experience": 5,
     "location": "Remote",
-    "job_type": "remote",
+    "job_type": "full_time",
+    "work_mode": "remote",
     "salary_min": 90000,
     "salary_max": 140000,
 }

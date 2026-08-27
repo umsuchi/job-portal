@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorMessage } from '@/api/client'
 import { applications, jobs } from '@/api/endpoints'
 import { Alert, Badge, Button, Card, EmptyState, Select, Skeleton } from '@/components/ui'
-import { STATUS_LABELS, STATUS_TONE, timeAgo } from '@/lib/format'
+import { Avatar } from '@/components/Avatar'
+import { EXPERIENCE_LABELS, STATUS_LABELS, STATUS_TONE, timeAgo } from '@/lib/format'
 import type { ApplicationStatus } from '@/api/types'
 
 /** Legal next states per the lifecycle in spec §11.2 — mirrored here so the UI
@@ -65,17 +66,42 @@ export function ApplicantsPage() {
           return (
             <Card key={a.id} className="p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold">{a.candidate.full_name ?? a.candidate.email}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {a.candidate.headline ?? a.candidate.email} · Applied {timeAgo(a.applied_at)}
-                  </p>
+                <div className="flex min-w-0 items-start gap-3">
+                  <Avatar
+                    src={a.candidate.avatar_url}
+                    name={a.candidate.full_name ?? a.candidate.email}
+                    size="lg"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-semibold">{a.candidate.full_name ?? a.candidate.email}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {a.candidate.headline ?? a.candidate.email}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {[
+                        a.candidate.experience_level
+                          ? EXPERIENCE_LABELS[a.candidate.experience_level]
+                          : null,
+                        a.candidate.years_experience != null
+                          ? `${a.candidate.years_experience} yrs`
+                          : null,
+                        a.candidate.location,
+                        `Applied ${timeAgo(a.applied_at)}`,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {a.unread_messages > 0 ? <Badge tone="accent">{a.unread_messages} new</Badge> : null}
                   <Badge tone={STATUS_TONE[a.status]}>{STATUS_LABELS[a.status]}</Badge>
                 </div>
               </div>
+
+              {a.candidate.bio ? (
+                <p className="mt-3 line-clamp-3 text-sm text-muted-foreground">
+                  {a.candidate.bio}
+                </p>
+              ) : null}
 
               {a.candidate.skills.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-1.5">

@@ -73,3 +73,14 @@ async def test_unread_surfaces_on_the_applicants_list(candidate, recruiter, appl
 async def test_empty_message_rejected(candidate, application):
     resp = await candidate.post(f"/applications/{application['id']}/messages", json={"body": "   "})
     assert resp.status_code == 422
+
+
+async def test_thread_carries_avatars(candidate, recruiter, application):
+    await candidate.put("/auth/me", json={"avatar_url": "https://example.com/me.png"})
+    await recruiter.put("/auth/me", json={"avatar_url": "https://example.com/logo.png"})
+
+    await candidate.post(f"/applications/{application['id']}/messages", json={"body": "Hi"})
+    thread = (await recruiter.get(f"/applications/{application['id']}/messages")).json()
+
+    assert thread["counterpart_avatar_url"] == "https://example.com/me.png"
+    assert thread["messages"][0]["sender_avatar_url"] == "https://example.com/me.png"

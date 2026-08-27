@@ -20,7 +20,8 @@ from app.schemas.message import MessageCreate, MessageOut, ThreadOut, UnreadCoun
 router = APIRouter(tags=["messages"])
 
 
-def _to_out(message: Message, viewer: User, names: dict) -> MessageOut:
+def _to_out(message: Message, viewer: User, people: dict) -> MessageOut:
+    who = people.get(message.sender_id, {})
     return MessageOut(
         id=message.id,
         application_id=message.application_id,
@@ -29,14 +30,19 @@ def _to_out(message: Message, viewer: User, names: dict) -> MessageOut:
         body=message.body,
         sent_at=message.sent_at,
         read_at=message.read_at,
-        sender_name=names.get(message.sender_id),
+        sender_name=who.get("name"),
+        sender_avatar_url=who.get("avatar_url"),
         is_mine=message.sender_id == viewer.id,
     )
 
 
-async def _names(db: AsyncSession, user_ids: List[uuid.UUID]) -> dict:
+async def _people(db: AsyncSession, user_ids: List[uuid.UUID]) -> dict:
+    """Display name and avatar for each user id, for rendering the thread."""
     rows = await db.execute(select(User).where(User.id.in_(user_ids)))
-    return {u.id: u.display_name for u in rows.scalars().all()}
+    return {
+        u.id: {"name": u.display_name, "avatar_url": u.avatar_url}
+        for u in rows.scalars().all()
+    }
 
 
 @router.get("/messages/unread-count", response_model=UnreadCount)
@@ -81,13 +87,15 @@ async def get_thread(
     counterpart_id = (
         job.recruiter_id if user.id == application.candidate_id else application.candidate_id
     )
-    names = await _names(db, [application.candidate_id, job.recruiter_id])
+    people = await _people(db, [application.candidate_id, job.recruiter_id])
+    counterpart = people.get(counterpart_id, {})
 
     return ThreadOut(
         application_id=application_id,
         job_title=job.title,
-        counterpart_name=names.get(counterpart_id, "Unknown"),
-        messages=[_to_out(m, user, names) for m in messages],
+        counterpart_name=counterpart.get("name", "Unknown"),
+        counterpart_avatar_url=counterpart.get("avatar_url"),
+        messages=[_to_out(m, user, people) for m in messages],
     )
 
 
@@ -125,5 +133,5 @@ async def send_message(
     await db.commit()
     await db.refresh(message)
 
-    names = await _names(db, [user.id])
-    return _to_out(message, user, names)
+    people = await _people(db, [user.id])
+    return _to_out(message, user, people)

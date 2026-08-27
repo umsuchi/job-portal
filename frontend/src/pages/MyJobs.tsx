@@ -2,7 +2,9 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobs } from '@/api/endpoints'
 import { Badge, Button, Card, EmptyState, Skeleton } from '@/components/ui'
-import { JOB_TYPE_LABELS, timeAgo } from '@/lib/format'
+import {
+  EXPERIENCE_LABELS, JOB_TYPE_LABELS, WORK_MODE_LABELS, deadlineState, timeAgo,
+} from '@/lib/format'
 
 export function MyJobsPage() {
   const queryClient = useQueryClient()
@@ -45,19 +47,31 @@ export function MyJobsPage() {
       ) : null}
 
       <div className="space-y-3">
-        {data?.items.map((job) => (
+        {data?.items.map((job) => {
+          const deadline = deadlineState(job.application_deadline, job.days_until_deadline)
+          return (
           <Card key={job.id} className="flex flex-wrap items-center justify-between gap-4 p-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <Link to={`/jobs/${job.id}`} className="font-semibold hover:underline">{job.title}</Link>
-                <Badge tone={job.status === 'open' ? 'success' : 'neutral'}>
+                <Badge tone={job.accepts_applications ? 'success' : 'neutral'}>
                   {job.status === 'open' ? 'Open' : 'Closed'}
+                </Badge>
+                {job.is_expired ? <Badge tone="danger">Expired</Badge> : null}
+                {!job.is_expired && (deadline.tone === 'today' || deadline.tone === 'soon')
+                  ? <Badge tone={deadline.tone === 'today' ? 'danger' : 'warn'}>
+                      {deadline.label}
+                    </Badge>
+                  : null}
+                <Badge tone={job.work_mode === 'remote' ? 'info' : 'neutral'}>
+                  {WORK_MODE_LABELS[job.work_mode] ?? job.work_mode}
                 </Badge>
                 <Badge>{JOB_TYPE_LABELS[job.job_type] ?? job.job_type}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {job.location} · Posted {timeAgo(job.created_at)} ·{' '}
+                {job.location} · {EXPERIENCE_LABELS[job.experience_level] ?? job.experience_level} · Posted {timeAgo(job.created_at)} ·{' '}
                 {job.application_count ?? 0} applicant{job.application_count === 1 ? '' : 's'}
+                {deadline.tone !== 'none' ? ` · ${deadline.label}` : ''}
               </p>
             </div>
 
@@ -87,7 +101,8 @@ export function MyJobsPage() {
               )}
             </div>
           </Card>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

@@ -25,6 +25,9 @@ from app.models.user import (
     User,
 )
 from app.schemas.auth import (
+    CANDIDATE_FIELDS,
+    MATCHING_FIELDS,
+    RECRUITER_FIELDS,
     AccessToken,
     LoginRequest,
     ProfileUpdate,
@@ -134,8 +137,10 @@ async def update_me(
 ):
     """US-1.4 — update the caller's own profile.
 
-    Changing a candidate's skills drops their cached suggestions so the next
-    dashboard load regenerates against the new skill set (US-5.3).
+    Fields are applied strictly by role: a candidate's payload can name
+    `company_name` and it will be ignored, and vice versa. Changing anything the
+    matcher scores drops the cached suggestions so the next dashboard load
+    regenerates (US-5.3).
     """
     data = payload.model_dump(exclude_unset=True)
 
@@ -145,11 +150,17 @@ async def update_me(
             profile = CandidateProfile(user_id=user.id, skills=[])
             db.add(profile)
             await db.flush()
-        skills_changed = "skills" in data and data["skills"] != list(profile.skills or [])
-        for field in ("full_name", "headline", "skills", "resume_url"):
+
+        # Any change to a field the ranking reads invalidates the cache — not
+        # just skills, since the matcher scores preferences and seniority too.
+        matching_changed = any(
+            field in data and data[field] != getattr(profile, field, None)
+            for field in MATCHING_FIELDS
+        )
+        for field in CANDIDATE_FIELDS:
             if field in data:
                 setattr(profile, field, data[field])
-        if skills_changed:
+        if matching_changed:
             cache = await db.get(SuggestionCache, user.id)
             if cache is not None:
                 await db.delete(cache)
@@ -159,7 +170,7 @@ async def update_me(
             profile = RecruiterProfile(user_id=user.id)
             db.add(profile)
             await db.flush()
-        for field in ("company_name", "company_website"):
+        for field in RECRUITER_FIELDS:
             if field in data:
                 setattr(profile, field, data[field])
 

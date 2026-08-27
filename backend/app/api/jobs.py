@@ -11,31 +11,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user_optional, require_recruiter
 from app.db.session import get_db
 from app.models.application import Application
-from app.models.job import JOB_CLOSED, JOB_OPEN, Job
+from app.models.job import JOB_CLOSED, JOB_OPEN, Job, today
 from app.models.message import Message
 from app.models.user import CandidateProfile, RecruiterProfile, User
 from app.schemas.application import ApplicantOut, CandidateSummary
 from app.schemas.common import Page
-from app.schemas.job import JobCreate, JobOut, JobUpdate
+from app.schemas.job import CompanyOut, JobCreate, JobOut, JobUpdate
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-async def _company_names(db: AsyncSession, recruiter_ids: List[uuid.UUID]) -> dict:
+async def _companies(db: AsyncSession, recruiter_ids: List[uuid.UUID]) -> dict:
+    """Recruiter profiles keyed by user id, for embedding in job responses."""
     if not recruiter_ids:
         return {}
     rows = await db.execute(
-        select(RecruiterProfile.user_id, RecruiterProfile.company_name).where(
-            RecruiterProfile.user_id.in_(recruiter_ids)
-        )
+        select(RecruiterProfile).where(RecruiterProfile.user_id.in_(recruiter_ids))
     )
-    return {rid: name for rid, name in rows.all()}
+    return {profile.user_id: profile for profile in rows.scalars().all()}
+
+
+def company_out(profile) -> CompanyOut | None:
+    if profile is None:
+        return None
+    return CompanyOut(
+        name=profile.company_name,
+        website=profile.company_website,
+        avatar_url=profile.avatar_url,
+        about=profile.about,
+        industry=profile.industry,
+        headquarters=profile.headquarters,
+    )
 
 
 async def _to_out(
     db: AsyncSession, jobs: List[Job], viewer: Optional[User] = None
 ) -> List[JobOut]:
-    companies = await _company_names(db, [j.recruiter_id for j in jobs])
+    companies = await _companies(db, [j.recruiter_id for j in jobs])
     job_ids = [j.id for j in jobs]
 
     counts: dict = {}
@@ -59,7 +71,10 @@ async def _to_out(
     out = []
     for j in jobs:
         item = JobOut.model_validate(j)
-        item.company_name = companies.get(j.recruiter_id)
+        profile = companies.get(j.recruiter_id)
+        item.company = company_out(profile)
+        # Kept alongside `company` so existing callers do not break.
+        item.company_name = getattr(profile, "company_name", None)
         item.application_count = counts.get(j.id, 0)
         if viewer is not None and viewer.is_candidate:
             item.has_applied = j.id in applied
@@ -73,6 +88,8 @@ def _apply_filters(
     skill: Optional[List[str]],
     location: Optional[str],
     job_type: Optional[str],
+    work_mode: Optional[str] = None,
+    experience_level: Optional[str] = None,
 ) -> Select:
     if q:
         like = f"%{q.strip()}%"
@@ -80,12 +97,21 @@ def _apply_filters(
     if skill:
         cleaned = [s.strip() for s in skill if s.strip()]
         if cleaned:
-            # Array overlap: the job needs at least one of the requested skills.
-            stmt = stmt.where(Job.required_skills.overlap(cleaned))
+            # Array overlap on either list: a nice-to-have still counts as a hit.
+            stmt = stmt.where(
+                or_(
+                    Job.required_skills.overlap(cleaned),
+                    Job.nice_to_have_skills.overlap(cleaned),
+                )
+            )
     if location:
         stmt = stmt.where(Job.location.ilike(f"%{location.strip()}%"))
     if job_type:
         stmt = stmt.where(Job.job_type == job_type)
+    if work_mode:
+        stmt = stmt.where(Job.work_mode == work_mode)
+    if experience_level:
+        stmt = stmt.where(Job.experience_level == experience_level)
     return stmt
 
 
@@ -95,7 +121,12 @@ async def list_jobs(
     skill: Optional[List[str]] = Query(default=None, description="Repeatable skill tag"),
     location: Optional[str] = None,
     job_type: Optional[str] = None,
+    work_mode: Optional[str] = None,
+    experience_level: Optional[str] = None,
     include_closed: bool = False,
+    include_expired: bool = Query(
+        default=False, description="Also list posts past their application deadline"
+    ),
     mine: bool = Query(default=False, description="Recruiter: only my own posts"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -118,12 +149,21 @@ async def list_jobs(
     if not (mine and include_closed):
         conditions.append(Job.status == JOB_OPEN)
 
+    # Expired posts behave the same way: hidden from browse, because they cannot
+    # be applied to, but always visible to their owner and by direct link.
+    if not include_expired and not mine:
+        conditions.append(
+            or_(Job.application_deadline.is_(None), Job.application_deadline >= today())
+        )
+
     if conditions:
         stmt = stmt.where(and_(*conditions))
         count_stmt = count_stmt.where(and_(*conditions))
 
-    stmt = _apply_filters(stmt, q, skill, location, job_type)
-    count_stmt = _apply_filters(count_stmt, q, skill, location, job_type)
+    stmt = _apply_filters(stmt, q, skill, location, job_type, work_mode, experience_level)
+    count_stmt = _apply_filters(
+        count_stmt, q, skill, location, job_type, work_mode, experience_level
+    )
 
     total = await db.scalar(count_stmt) or 0
     rows = await db.execute(
@@ -259,7 +299,12 @@ async def list_applicants(
                     email=user.email,
                     full_name=getattr(profile, "full_name", None),
                     headline=getattr(profile, "headline", None),
+                    bio=getattr(profile, "bio", None),
+                    avatar_url=getattr(profile, "avatar_url", None),
+                    location=getattr(profile, "location", None),
                     skills=list(getattr(profile, "skills", None) or []),
+                    years_experience=getattr(profile, "years_experience", None),
+                    experience_level=getattr(profile, "experience_level", None),
                     resume_url=getattr(profile, "resume_url", None),
                 ),
                 unread_messages=unread.get(app_row.id, 0),

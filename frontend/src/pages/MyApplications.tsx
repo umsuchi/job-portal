@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorMessage } from '@/api/client'
 import { applications } from '@/api/endpoints'
 import { Alert, Badge, Button, Card, EmptyState, Skeleton } from '@/components/ui'
-import { STATUS_LABELS, STATUS_TONE, timeAgo } from '@/lib/format'
+import { Avatar } from '@/components/Avatar'
+import { STATUS_LABELS, STATUS_TONE, WORK_MODE_LABELS, timeAgo } from '@/lib/format'
 
 const TERMINAL = new Set(['hired', 'rejected', 'withdrawn'])
 
@@ -42,18 +43,23 @@ export function MyApplicationsPage() {
       <div className="space-y-3">
         {data?.map((a) => (
           <Card key={a.id} className="flex flex-wrap items-center justify-between gap-4 p-5">
-            <div className="min-w-0">
+            <div className="flex min-w-0 items-start gap-3">
+              <Avatar src={a.job?.company_avatar_url} name={a.job?.company_name} />
+              <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Link to={`/jobs/${a.job_id}`} className="font-semibold hover:underline">
                   {a.job?.title ?? 'Job'}
                 </Link>
                 <Badge tone={STATUS_TONE[a.status]}>{STATUS_LABELS[a.status]}</Badge>
                 {a.unread_messages > 0 ? <Badge tone="accent">{a.unread_messages} new</Badge> : null}
+                {a.job?.is_expired ? <Badge tone="neutral">Post expired</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                {a.job?.company_name ?? 'Independent recruiter'} · {a.job?.location} ·
+                {a.job?.company_name ?? 'Independent recruiter'} · {a.job?.location}
+                {a.job ? ` · ${WORK_MODE_LABELS[a.job.work_mode] ?? a.job.work_mode}` : ''} ·
                 {' '}Applied {timeAgo(a.applied_at)}
               </p>
+              </div>
             </div>
 
             <div className="flex gap-2">

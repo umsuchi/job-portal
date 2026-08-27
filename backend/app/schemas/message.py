@@ -21,6 +21,7 @@ class MessageOut(BaseModel):
     sent_at: datetime
     read_at: Optional[datetime] = None
     sender_name: Optional[str] = None
+    sender_avatar_url: Optional[str] = None
     is_mine: bool = False
 
 
@@ -28,6 +29,7 @@ class ThreadOut(BaseModel):
     application_id: uuid.UUID
     job_title: str
     counterpart_name: str
+    counterpart_avatar_url: Optional[str] = None
     messages: List[MessageOut]
 
 

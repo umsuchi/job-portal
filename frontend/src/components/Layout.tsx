@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/context/AuthContext'
 import { messages } from '@/api/endpoints'
+import { Avatar } from '@/components/Avatar'
 import { Badge, Button } from '@/components/ui'
 import { cn } from '@/lib/cn'
 
@@ -62,9 +63,21 @@ export function Layout() {
             {user ? (
               <>
                 <NavLink to="/profile" className={navClass}>
-                  {user.candidate_profile?.full_name
-                    || user.recruiter_profile?.company_name
-                    || user.email}
+                  <span className="inline-flex items-center gap-2">
+                    <Avatar
+                      size="sm"
+                      src={user.candidate_profile?.avatar_url
+                        ?? user.recruiter_profile?.avatar_url}
+                      name={user.candidate_profile?.full_name
+                        ?? user.recruiter_profile?.company_name
+                        ?? user.email}
+                    />
+                    <span className="hidden sm:inline">
+                      {user.candidate_profile?.full_name
+                        || user.recruiter_profile?.company_name
+                        || user.email}
+                    </span>
+                  </span>
                 </NavLink>
                 <Button variant="ghost" size="sm" onClick={() => { signOut(); navigate('/login') }}>
                   Sign out

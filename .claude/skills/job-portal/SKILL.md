@@ -94,8 +94,75 @@ backend/app/
   hand-rolling a one-off button.
 - Ternaries, not `&&`, for conditional JSX (`0 &&` renders a stray zero).
 - Never define a component inside another component.
+- **A card that represents one thing should be clickable across its whole
+  surface**, not only on its title. Use the stretched-link pattern: `relative` on
+  the card, `after:absolute after:inset-0` on the one real `<Link>`. That keeps a
+  single anchor in the accessibility tree — do not nest a second `<a>`, and give
+  any other interactive child `relative z-10` so the overlay does not swallow it.
+  Cards carrying their own action buttons (MyJobs) keep the title-only link.
+- **When a role gate hides an action, say so.** A recruiter viewing someone
+  else's job used to see an empty button row; it now explains that only
+  candidates can apply. An unexplained absence reads as a broken page.
 - The UI only offers status transitions the API will accept — `NEXT_STATES` in
   `pages/Applicants.tsx` mirrors the backend state machine. Change both together.
+
+## The matching model
+
+`services/matcher.py` scores each shortlisted job on several weighted signals —
+required skills, requirement coverage, nice-to-haves, seniority distance, work
+mode, location, employment type, salary, recency — not on skill overlap alone.
+
+- **Every signal that fires must produce a short human-readable label.** Those
+  labels become chips on the dashboard and grounding for the AI prompt. A signal
+  that only moves the number is a bug: the user cannot see why a job ranked where
+  it did.
+- **A missing preference is neutral, never disqualifying.** Candidates fill in
+  what they want to; an empty `preferred_locations` stops being scored rather
+  than zeroing the job.
+- **A poor fit is demoted, never hidden.** Under the stated years bar, or paying
+  below the floor, costs points — the bar is usually soft, and an empty dashboard
+  is worse than an imperfect one.
+- **Weights live in module constants** (`W_REQUIRED_SKILL` and friends). Tune
+  there, not inline.
+- `profile_hash()` covers **every field the ranking reads**. Add a scored field
+  and you must add it to that hash, or the cache serves stale suggestions after a
+  profile edit. `tests/test_matching.py` has a test for exactly this.
+- Each signal has an isolating test: two jobs identical on skills, differing only
+  in the thing under test. Add a signal, add that test.
+
+## Job post shape
+
+`job_type` is employment type only (full-time, part-time, contract, internship,
+temporary). Work arrangement is `work_mode` (on-site, hybrid, remote) — they were
+one column in the original spec, which meant a full-time remote role could not
+describe itself, and location matching had nothing to read.
+
+`required_skills` drive matching; `nice_to_have_skills` widen the shortlist at a
+third of the weight. The schema layer strips any skill appearing on both lists
+from the nice-to-haves, so the matcher never counts one twice.
+
+## Deadlines and derived state
+
+`application_deadline` is a `DATE` and is **inclusive** — a job whose deadline is
+today still accepts applications.
+
+- **All date maths lives on the model**, as `is_expired`, `days_until_deadline`
+  and `accepts_applications`, and ships in every job response. Never recompute
+  expiry in a route handler or in the frontend: the client's timezone moves the
+  boundary by a day, and two places computing it will disagree.
+- `accepts_applications` (open AND not expired) is the single question the apply
+  endpoint and the UI both ask. Prefer it to checking `status` and `is_expired`
+  separately.
+- **Expiry is enforced in the API**, not just hidden in the UI. A stale page or a
+  direct POST must still be refused.
+- **Rejected on create, allowed on update.** A past deadline at creation is a
+  typo; on update it is how a recruiter ends applications early, and forbidding
+  it would make an expired post uneditable forever.
+- Expired posts are hidden from browse and suggestions but always reachable by
+  direct link and always visible to their owner. A bookmark should never 404.
+- Expiry never touches applications already submitted.
+- `CURRENT_DATE` is not immutable, so it cannot go in a partial index predicate —
+  do not try to index the "not expired" condition.
 
 ## The skill catalogue
 
@@ -126,9 +193,14 @@ candidates, 15 jobs, 21 applications, 4 threads. Password `password123`.
 - Idempotent by email, so re-running is safe and never duplicates.
 - `--reset` deletes only seeded accounts; the `ON DELETE CASCADE` from `users`
   takes their jobs, applications and messages. Hand-created data survives.
-- The seed deliberately covers every application status and leaves the last
-  message of each thread unread, so the status controls and the unread badge are
-  both visible without clicking anything first.
+- The seed deliberately covers every application status, every work mode, and
+  several seniority levels, and leaves the last message of each thread unread —
+  so the filters, the status controls and the unread badge are all visible
+  without clicking anything first. Tests enforce that coverage.
+- Every seeded record is fully populated. A job with no responsibilities or a
+  candidate with no preferences makes a feature look broken rather than empty;
+  `test_seed_data.py` fails if either appears.
+- Avatars are DiceBear initials URLs, so no image files are checked in.
 - If you add a candidate, keep at least one skill overlapping a seeded job —
   `test_every_candidate_matches_at_least_one_job` enforces it, because an empty
   dashboard reads as a broken feature.

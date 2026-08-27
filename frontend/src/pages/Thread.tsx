@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorMessage } from '@/api/client'
 import { messages } from '@/api/endpoints'
+import { Avatar } from '@/components/Avatar'
 import { Alert, Button, Card, EmptyState, Skeleton, Textarea } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { formatTime } from '@/lib/format'
@@ -64,8 +65,16 @@ export function ThreadPage() {
         ← Back
       </button>
 
-      <h1 className="mt-4 text-2xl font-semibold tracking-tight">{data.counterpart_name}</h1>
-      <p className="mb-6 mt-1 text-sm text-muted-foreground">About: {data.job_title}</p>
+      <div className="mt-4 flex items-center gap-3">
+        <Avatar
+          src={data.counterpart_avatar_url} name={data.counterpart_name} size="lg"
+        />
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{data.counterpart_name}</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">About: {data.job_title}</p>
+        </div>
+      </div>
+      <div className="mb-6" />
 
       <Card className="flex max-h-[60vh] flex-col overflow-y-auto p-5">
         {data.messages.length === 0 ? (
@@ -75,7 +84,10 @@ export function ThreadPage() {
         ) : (
           <div className="space-y-3">
             {data.messages.map((m) => (
-              <div key={m.id} className={cn('flex', m.is_mine ? 'justify-end' : 'justify-start')}>
+              <div key={m.id} className={cn('flex items-end gap-2', m.is_mine ? 'justify-end' : 'justify-start')}>
+                {m.is_mine ? null : (
+                  <Avatar size="sm" src={m.sender_avatar_url} name={m.sender_name} />
+                )}
                 <div
                   className={cn(
                     'max-w-[80%] rounded-lg px-3 py-2 text-sm',

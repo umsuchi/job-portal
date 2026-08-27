@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -46,6 +46,12 @@ NOW = datetime.now(timezone.utc)
 
 def ago(days: float) -> datetime:
     return NOW - timedelta(days=days)
+
+
+def deadline_for(index: int) -> date | None:
+    """Turn the seed's relative offsets into real dates at run time."""
+    offset = data.JOB_DEADLINE_DAYS.get(index)
+    return None if offset is None else (NOW + timedelta(days=offset)).date()
 
 
 async def seeded_emails(db: AsyncSession) -> Dict[str, User]:
@@ -82,8 +88,7 @@ async def seed(db: AsyncSession) -> None:
             await db.flush()
             db.add(RecruiterProfile(
                 user_id=user.id,
-                company_name=spec["company_name"],
-                company_website=spec["company_website"],
+                **{k: v for k, v in spec.items() if k != "email"},
             ))
             created_recruiters += 1
         recruiters.append(user)
@@ -99,9 +104,7 @@ async def seed(db: AsyncSession) -> None:
             await db.flush()
             db.add(CandidateProfile(
                 user_id=user.id,
-                full_name=spec["full_name"],
-                headline=spec["headline"],
-                skills=spec["skills"],
+                **{k: v for k, v in spec.items() if k != "email"},
             ))
             created_candidates += 1
         candidates.append(user)
@@ -119,13 +122,9 @@ async def seed(db: AsyncSession) -> None:
         if job is None:
             job = Job(
                 recruiter_id=recruiter.id,
-                title=spec["title"],
-                description=spec["description"],
-                required_skills=spec["required_skills"],
-                location=spec["location"],
-                job_type=spec["job_type"],
-                salary_min=spec["salary_min"],
-                salary_max=spec["salary_max"],
+                # Every key but the recruiter pointer maps straight onto a column.
+                **{k: v for k, v in spec.items() if k != "recruiter"},
+                application_deadline=deadline_for(index),
                 # Staggered so the "newest first" browse order looks real.
                 created_at=ago(30 - index * 1.5),
             )
@@ -199,6 +198,13 @@ async def seed(db: AsyncSession) -> None:
     print(line("jobs", created_jobs, len(jobs)))
     print(line("applications", created_applications, len(applications)))
     print(f"  {'messages':<14} {created_messages} created")
+
+    live = sum(1 for j in jobs if j.accepts_applications)
+    soon = sum(1 for j in jobs
+               if j.days_until_deadline is not None and 0 <= j.days_until_deadline <= 7)
+    expired = sum(1 for j in jobs if j.is_expired)
+    print(f"  {'':<14} of those jobs: {live} accepting, {soon} closing within a "
+          f"week, {expired} expired")
     print()
     print(f"Every seeded account uses the password: {data.SEED_PASSWORD}")
     print(f"  recruiter: {data.RECRUITERS[0]['email']}")

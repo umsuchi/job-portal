@@ -1,7 +1,7 @@
 import { api } from './client'
 import type {
-  Applicant, Application, ApplicationStatus, Job, JobType, Page,
-  SuggestionsResponse, Thread, TokenPair, User,
+  Applicant, Application, ApplicationStatus, ExperienceLevel, Job, JobType, Page,
+  SuggestionsResponse, Thread, TokenPair, User, WorkMode,
 } from './types'
 
 export const auth = {
@@ -15,10 +15,8 @@ export const auth = {
 
   me: () => api.get<User>('/auth/me').then((r) => r.data),
 
-  updateProfile: (body: Partial<{
-    full_name: string; headline: string; skills: string[]; resume_url: string
-    company_name: string; company_website: string
-  }>) => api.put<User>('/auth/me', body).then((r) => r.data),
+  updateProfile: (body: Record<string, unknown>) =>
+    api.put<User>('/auth/me', body).then((r) => r.data),
 }
 
 export interface JobFilters {
@@ -26,8 +24,11 @@ export interface JobFilters {
   skill?: string[]
   location?: string
   job_type?: JobType | ''
+  work_mode?: WorkMode | ''
+  experience_level?: ExperienceLevel | ''
   mine?: boolean
   include_closed?: boolean
+  include_expired?: boolean
   limit?: number
   offset?: number
 }

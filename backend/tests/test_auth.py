@@ -106,3 +106,55 @@ def test_password_hashing_roundtrip():
 def test_overlong_password_is_rejected_rather_than_truncated():
     with pytest.raises(ValueError):
         hash_password("x" * 73)
+
+
+# --------------------------------------------- extended profile fields (EP-1)
+
+async def test_candidate_profile_carries_the_matching_fields(candidate):
+    resp = await candidate.put("/auth/me", json={
+        "avatar_url": "https://example.com/me.png",
+        "bio": "Long-form background that the AI prompt also sees.",
+        "location": "Dhaka, Bangladesh",
+        "years_experience": 7,
+        "experience_level": "senior",
+        "preferred_job_types": ["full_time", "contract"],
+        "preferred_work_modes": ["remote"],
+        "preferred_locations": ["Remote", "Dhaka"],
+        "desired_salary_min": 90000,
+        "open_to_work": True,
+    })
+    assert resp.status_code == 200
+    profile = resp.json()["candidate_profile"]
+    assert profile["avatar_url"] == "https://example.com/me.png"
+    assert profile["years_experience"] == 7
+    assert profile["preferred_work_modes"] == ["remote"]
+    assert profile["desired_salary_min"] == 90000
+
+
+async def test_recruiter_profile_carries_company_detail(recruiter):
+    resp = await recruiter.put("/auth/me", json={
+        "avatar_url": "https://example.com/logo.png",
+        "about": "What the company does, shown on every job post.",
+        "industry": "Developer tooling",
+        "headquarters": "Amsterdam, Netherlands",
+    })
+    assert resp.status_code == 200
+    profile = resp.json()["recruiter_profile"]
+    assert profile["industry"] == "Developer tooling"
+    assert profile["headquarters"] == "Amsterdam, Netherlands"
+
+
+async def test_invalid_enum_values_are_rejected(candidate):
+    assert (await candidate.put("/auth/me",
+                                json={"experience_level": "wizard"})).status_code == 422
+    assert (await candidate.put("/auth/me",
+                                json={"preferred_work_modes": ["telepathic"]})).status_code == 422
+    assert (await candidate.put("/auth/me",
+                                json={"years_experience": -1})).status_code == 422
+
+
+async def test_a_recruiter_cannot_write_candidate_matching_fields(recruiter):
+    """Role scoping: the payload is accepted, the foreign fields are ignored."""
+    resp = await recruiter.put("/auth/me", json={"skills": ["React"], "years_experience": 9})
+    assert resp.status_code == 200
+    assert resp.json()["candidate_profile"] is None

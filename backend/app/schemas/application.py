@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,8 +30,13 @@ class JobSummary(BaseModel):
     title: str
     location: str
     job_type: str
+    work_mode: str = "onsite"
+    experience_level: str = "mid"
+    application_deadline: Optional[date] = None
+    is_expired: bool = False
     status: str
     company_name: Optional[str] = None
+    company_avatar_url: Optional[str] = None
 
 
 class CandidateSummary(BaseModel):
@@ -39,7 +44,12 @@ class CandidateSummary(BaseModel):
     email: str
     full_name: Optional[str] = None
     headline: Optional[str] = None
+    bio: Optional[str] = None
+    avatar_url: Optional[str] = None
+    location: Optional[str] = None
     skills: List[str] = Field(default_factory=list)
+    years_experience: Optional[int] = None
+    experience_level: Optional[str] = None
     resume_url: Optional[str] = None
 
 

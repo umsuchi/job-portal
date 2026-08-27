@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.models.application import APPLICATION_STATUSES
-from app.models.job import JOB_TYPES
+from app.models.job import EXPERIENCE_LEVELS, JOB_TYPES, WORK_MODES
 from scripts import data
 
 CATALOGUE = (
@@ -42,9 +42,47 @@ def test_jobs_reference_real_recruiters_and_valid_enums():
     for job in data.JOBS:
         assert 0 <= job["recruiter"] < len(data.RECRUITERS)
         assert job["job_type"] in JOB_TYPES
+        assert job["work_mode"] in WORK_MODES
+        assert job["experience_level"] in EXPERIENCE_LEVELS
         assert job["required_skills"], f"{job['title']} has no required skills"
         assert job["salary_min"] <= job["salary_max"]
         assert len(job["description"]) >= 10
+
+
+def test_jobs_carry_the_structured_detail():
+    """A demo job with an empty responsibilities list shows an empty page."""
+    for job in data.JOBS:
+        for section in ("responsibilities", "requirements", "benefits"):
+            assert job[section], f"{job['title']} has no {section}"
+        assert job["nice_to_have_skills"], f"{job['title']} has no nice-to-haves"
+        # A skill on both lists would be scored twice by the matcher.
+        required = {s.lower() for s in job["required_skills"]}
+        assert not required & {s.lower() for s in job["nice_to_have_skills"]}
+
+
+def test_seed_covers_every_work_mode_and_several_levels():
+    """So the filters and the ranking signals are all visible in the demo."""
+    assert {j["work_mode"] for j in data.JOBS} == set(WORK_MODES)
+    assert len({j["experience_level"] for j in data.JOBS}) >= 3
+    assert len({j["job_type"] for j in data.JOBS}) >= 3
+
+
+def test_profiles_carry_the_matching_inputs():
+    for candidate in data.CANDIDATES:
+        for field in ("avatar_url", "bio", "location", "years_experience",
+                      "experience_level", "preferred_job_types",
+                      "preferred_work_modes", "preferred_locations",
+                      "desired_salary_min"):
+            assert candidate.get(field), f"{candidate['full_name']} is missing {field}"
+        assert candidate["experience_level"] in EXPERIENCE_LEVELS
+        for job_type in candidate["preferred_job_types"]:
+            assert job_type in JOB_TYPES
+        for mode in candidate["preferred_work_modes"]:
+            assert mode in WORK_MODES
+
+    for recruiter in data.RECRUITERS:
+        for field in ("avatar_url", "about", "industry", "headquarters"):
+            assert recruiter.get(field), f"{recruiter['company_name']} is missing {field}"
 
 
 def test_applications_are_valid_and_unique_per_pair():
@@ -95,6 +133,7 @@ def test_seed_skills_use_catalogue_spellings():
 
     used = {s for c in data.CANDIDATES for s in c["skills"]}
     used |= {s for j in data.JOBS for s in j["required_skills"]}
+    used |= {s for j in data.JOBS for s in j["nice_to_have_skills"]}
 
     unknown = sorted(used - known)
     assert not unknown, f"seed skills missing from the frontend catalogue: {unknown}"

@@ -171,3 +171,69 @@ Admin role · email verification / password reset · resume upload & parsing · 
 - [x] **8 seed tests** — structure, uniqueness, status coverage, and a
   cross-language check that seed skills match the catalogue's spellings exactly.
   58 tests total.
+
+## EP-6 — Richer posts, profiles and matching
+
+- [x] **6.1 Job posts carry real detail** — `work_mode` split out of `job_type`,
+  `experience_level` + `min_years_experience`, `nice_to_have_skills` (own GIN
+  index), and `responsibilities` / `requirements` / `benefits` as structured
+  lists. Salary gains a currency.
+- [x] **6.2 Candidate profiles carry matching inputs** — bio, avatar, location,
+  years of experience, seniority, preferred work modes / employment types /
+  locations, and a salary floor. Recruiters gain a logo, about, industry and
+  headquarters.
+- [x] **6.3 Multi-signal ranking** — `services/matcher.py` scores nine weighted
+  signals and emits a readable label for each. Skill overlap still dominates;
+  the rest break ties and demote roles that match on paper but not in practice.
+- [x] **6.4 Cache key covers the whole profile** — `profile_hash()` replaced
+  `skills_hash()`, so changing a preference invalidates cached suggestions.
+  Previously only a skill change did, and a preference edit silently served a
+  stale list.
+- [x] **6.5 Richer AI prompt** — the model receives the candidate's bio,
+  seniority and preferences alongside each job's description, mode and salary
+  band, so reasons can cite the thing that actually fits.
+- [x] **6.6 Migration** `0c609d6cdfda` — additive, plus a backfill rewriting
+  `job_type='remote'` to `full_time` + `work_mode='remote'` before tightening the
+  constraint. Downgrade folds it back. Round-trip verified against Postgres 16.
+- [x] **6.7 Frontend** — `Avatar`, `BulletListInput` and `CheckboxGroup`
+  primitives; profile forms for both roles; job form with structured sections;
+  job detail with company panel; work-mode and level filters; match-signal chips
+  on the dashboard.
+- [x] **6.8 Seed and tests** — every seeded record fully populated; 92 tests,
+  including one isolating test per ranking signal.
+
+## Fixed after review
+
+- [x] **Clicking a job card did nothing unless you hit the title.** Only the
+  title text was a link. The card now uses a stretched-link overlay, so the whole
+  surface navigates while the accessibility tree still sees one link. Verified in
+  a real browser on both the browse list and the dashboard.
+- [x] **Apply button was invisible without explanation for recruiters.** It was
+  correctly role-gated all along — the gap was that a recruiter (or a candidate
+  looking at a closed role) saw an empty row with no reason. Both cases now say
+  why.
+- [x] **Backend/frontend contract audited.** All 13 response schemas match the
+  frontend types field-for-field, and every route except `/health` is called by
+  the client.
+
+## EP-7 — Application deadlines
+
+- [x] **7.1 `application_deadline`** — inclusive `DATE` on jobs, migration
+  `b41d7f2a9c33`, with a partial index on the non-null rows. Existing posts get
+  NULL, which reads as "never expires", so nothing that was applicable yesterday
+  stops being applicable today.
+- [x] **7.2 Derived state on the model** — `is_expired`,
+  `days_until_deadline`, `accepts_applications`, returned on every job so no
+  client repeats the arithmetic.
+- [x] **7.3 Enforced, not just displayed** — applications past the deadline are
+  refused with a 400 naming the date; expired posts leave browse and suggestions
+  but stay reachable by direct link and editable by their owner.
+- [x] **7.4 Four UI states** — routine date, amber "closes in N days" inside a
+  week, red "closes today", red "Expired" with a dimmed card and a banner
+  explaining the missing Apply button. Plus an include-expired browse filter and
+  a date field on the job form.
+- [x] **7.5 Seed covers every state** — 4 jobs with no deadline, 6 open, 3
+  closing within a week, 2 already expired, all relative to the seed run so the
+  demo never goes stale.
+- [x] **7.6 14 tests**, most sitting on the inclusive boundary, where an
+  off-by-one would live.
